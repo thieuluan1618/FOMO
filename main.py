@@ -118,37 +118,64 @@ def answer_question(client, question, guide_summary, guide_document="", language
         
         language_instruction = language_instructions.get(language, "")
 
-        # System prompt with CoT and few-shot examples
+        # System prompt with CoT and structured JSON output
         system_prompt = f"""You are an expert assistant specialized in analyzing user guides and technical documentation.{language_instruction}
 
-## Your Approach (Chain of Thought):
-1. First, identify the relevant sections in the provided documentation
-2. Think through the answer step-by-step
-3. Provide a clear, accurate, and helpful response
-4. When possible, reference specific parts of the guide
+## Your Task:
+Analyze the provided documentation and answer user questions using Chain of Thought reasoning, then return your response in structured JSON format.
+
+## Response Format:
+You MUST return your response as valid JSON with this structure:
+{{
+    "reasoning": "Your internal step-by-step thought process (not shown to user)",
+    "answer": "The clear, helpful answer for the user",
+    "confidence": 0.0 to 1.0,
+    "sources": ["List of relevant sections or references from the guide"],
+    "found_in_guide": true or false
+}}
 
 ## Few-Shot Examples:
 
 Example 1:
-Q: How do I reset the application to default settings?
-Thought Process: I need to look for reset, restore, or default settings instructions in the guide.
-Answer: According to the user guide, to reset the application: Navigate to Settings > Advanced Options > Reset to Defaults. Click "Confirm Reset" and restart the application.
+Q: How do I reset the application?
+Response:
+{{
+    "reasoning": "Looking for reset instructions... Found in Settings section under Advanced Options",
+    "answer": "To reset the application: Navigate to Settings > Advanced Options > Reset to Defaults. Click 'Confirm Reset' and restart the application.",
+    "confidence": 0.95,
+    "sources": ["Settings section", "Advanced Options"],
+    "found_in_guide": true
+}}
 
 Example 2:
 Q: What are the system requirements?
-Thought Process: I should find technical specifications or requirements section.
-Answer: The guide specifies these minimum requirements: Operating System: Windows 10 or later / macOS 10.15+, Memory: 8GB RAM, Storage: 50GB available space, Internet connection for updates.
+Response:
+{{
+    "reasoning": "Searching for technical specifications or requirements section in the documentation",
+    "answer": "Minimum requirements: Windows 10+ or macOS 10.15+, 8GB RAM, 50GB storage, internet connection for updates.",
+    "confidence": 1.0,
+    "sources": ["System Requirements section"],
+    "found_in_guide": true
+}}
 
 Example 3:
-Q: Can I use this feature offline?
-Thought Process: I need to check for offline capabilities or internet requirements mentioned in the guide.
-Answer: Based on the documentation, most features work offline after initial setup. However, cloud sync and automatic updates require an internet connection.
+Q: Can I use custom themes?
+Response:
+{{
+    "reasoning": "Searched for themes, customization, appearance settings - no relevant information found",
+    "answer": "The documentation doesn't mention custom themes or appearance customization options.",
+    "confidence": 0.8,
+    "sources": [],
+    "found_in_guide": false
+}}
 
 ## Important Instructions:
-- Base your answers strictly on the provided documentation
-- If information is not in the guide, clearly state that
-- Be concise but complete in your responses
-- Use step-by-step instructions when describing procedures"""
+- Always return valid JSON format
+- Use the "reasoning" field for your Chain of Thought process
+- Keep "answer" field user-friendly and direct
+- Set confidence based on how certain you are
+- List actual section names in "sources"
+- Set "found_in_guide" to false if information is not available"""
 
         # Create context with document information
         context = f"User Guide Summary:\n{guide_summary}"
@@ -162,7 +189,7 @@ Answer: Based on the documentation, most features work offline after initial set
 
 User Question: {question}
 
-Please provide your answer using the Chain of Thought approach described in your instructions."""
+Remember to return your response in the specified JSON format."""
         
         response = client.chat.completions.create(
             model=model,
@@ -170,11 +197,35 @@ Please provide your answer using the Chain of Thought approach described in your
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt}
             ],
-            max_tokens=300,
+            max_tokens=400,  # Increased for JSON structure
             temperature=0.1  # Lower temperature for more factual responses
         )
         
-        return response.choices[0].message.content
+        # Parse JSON response and extract just the answer
+        import json
+        try:
+            response_json = json.loads(response.choices[0].message.content)
+            
+            # Optionally log the reasoning for debugging (without showing to user)
+            if response_json.get("reasoning"):
+                print(f"🧠 CoT Reasoning: {response_json['reasoning']}")
+            
+            # Return just the clean answer for the user
+            answer = response_json.get("answer", "Unable to generate response")
+            
+            # Optionally append confidence/source info if desired
+            if response_json.get("confidence", 1.0) < 0.5:
+                answer += "\n\n⚠️ Note: Low confidence in this answer."
+            
+            if not response_json.get("found_in_guide", True):
+                answer += "\n\n📝 Note: This information was not found in the guide."
+                
+            return answer
+            
+        except json.JSONDecodeError:
+            # Fallback to raw response if JSON parsing fails
+            print("⚠️ JSON parsing failed, returning raw response")
+            return response.choices[0].message.content
         
     except Exception as e:
         return f"❌ Error answering question: {str(e)}"
