@@ -3,6 +3,9 @@ import os
 from openai import AzureOpenAI
 from dotenv import load_dotenv
 import io
+import json
+import re
+from datetime import datetime
 
 # Load environment variables from .env file
 load_dotenv()
@@ -24,6 +27,10 @@ if 'chat_history' not in st.session_state:
     st.session_state.chat_history = []
 if 'guide_context' not in st.session_state:
     st.session_state.guide_context = ""
+if 'previous_question' not in st.session_state:
+    st.session_state.previous_question = ""
+if 'support_tickets' not in st.session_state:
+    st.session_state.support_tickets = []
 
 def initialize_client():
     """Initialize Azure OpenAI client with error handling"""
@@ -45,6 +52,90 @@ def initialize_client():
     except Exception as e:
         st.error(f"❌ Failed to initialize Azure OpenAI client: {str(e)}")
         return None
+
+def create_support_ticket(name, email, question, previous_question=""):
+    """Create a customer support ticket"""
+    try:
+        # Create ticket object
+        ticket = {
+            "id": f"TICKET-{datetime.now().strftime('%Y%m%d%H%M%S')}",
+            "name": name,
+            "email": email,
+            "question": question,
+            "previous_question": previous_question,
+            "timestamp": datetime.now().isoformat(),
+            "status": "pending"
+        }
+        
+        # Log for debugging
+        print(f"📋 Support ticket created: {ticket['id']}")
+        print(f"   Name: {name}")
+        print(f"   Email: {email}")
+        print(f"   Question: {question}")
+        if previous_question:
+            print(f"   Context: {previous_question}")
+        
+        return {
+            "success": True,
+            "ticket": ticket,
+            "ticket_id": ticket["id"],
+            "message": f"Support ticket {ticket['id']} has been created successfully. Our team will contact you at {email} within 24-48 hours."
+        }
+        
+    except Exception as e:
+        print(f"❌ Error creating support ticket: {str(e)}")
+        return {
+            "success": False,
+            "message": f"Failed to create support ticket: {str(e)}"
+        }
+
+def detect_support_request(question):
+    """Detect if the user wants to contact customer support and extract contact info"""
+    
+    # Pattern to detect support request intent
+    support_patterns = [
+        r"contact.*support",
+        r"contact.*customer",
+        r"need.*help.*email",
+        r"reach.*support",
+        r"talk.*to.*support",
+        r"liên hệ.*hỗ trợ",  # Vietnamese
+        r"cần.*trợ giúp",    # Vietnamese
+    ]
+    
+    # Check if it's a support request
+    is_support_request = any(re.search(pattern, question, re.IGNORECASE) for pattern in support_patterns)
+    
+    if not is_support_request:
+        return None
+    
+    # Extract email pattern
+    email_pattern = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
+    email_match = re.search(email_pattern, question)
+    email = email_match.group(0) if email_match else None
+    
+    # Extract name (simple heuristic - words after "name is" or "I am" or similar)
+    name_patterns = [
+        r"(?:my name is|i am|i'm|name:|tên:|tôi là)\s+([A-Za-z]+(?:\s+[A-Za-z]+)?)",
+        r"([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\s+(?:here|writing)",
+    ]
+    
+    name = None
+    for pattern in name_patterns:
+        match = re.search(pattern, question, re.IGNORECASE)
+        if match:
+            name = match.group(1).strip()
+            break
+    
+    # If we found both name and email, return the info
+    if name and email:
+        return {
+            "name": name,
+            "email": email,
+            "original_question": question
+        }
+    
+    return None
 
 def summarize_user_guide(client, text, summary_style="concise", max_tokens=300, temperature=0.3, language="English", model="gpt-4o-mini"):
     """Generate user guide summary using Azure OpenAI"""
@@ -94,7 +185,7 @@ def summarize_user_guide(client, text, summary_style="concise", max_tokens=300, 
         return f"❌ Error generating summary: {str(e)}"
 
 def answer_question(client, question, guide_summary, guide_document="", language="English", model="gpt-4o-mini"):
-    """Answer questions about the user guide using the summary and document"""
+    """Answer questions about the user guide using native OpenAI function calling"""
     try:
         if not question.strip():
             return "⚠️ Please ask a question about the user guide."
@@ -102,80 +193,78 @@ def answer_question(client, question, guide_summary, guide_document="", language
         if not guide_summary.strip():
             return "⚠️ No guide summary available. Please generate a summary first."
         
+        # Get the previous question BEFORE updating it
+        previous_question = st.session_state.get('previous_question', '')
+        
+        # Define available functions for OpenAI
+        functions = [
+            {
+                "name": "create_support_ticket",
+                "description": "Create a customer support ticket when user wants to contact support and provides their name and email",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "name": {
+                            "type": "string",
+                            "description": "The customer's full name"
+                        },
+                        "email": {
+                            "type": "string",
+                            "description": "The customer's email address"
+                        },
+                        "issue_description": {
+                            "type": "string",
+                            "description": "Description of the issue or question"
+                        }
+                    },
+                    "required": ["name", "email", "issue_description"]
+                }
+            }
+        ]
+        
         # Language-specific instructions
         language_instructions = {
             "English": "",
-            "Spanish": " Please respond in Spanish.",
-            "French": " Please respond in French.",
-            "German": " Please respond in German.",
-            "Italian": " Please respond in Italian.",
-            "Portuguese": " Please respond in Portuguese.",
-            "Japanese": " Please respond in Japanese.",
-            "Chinese (Simplified)": " Please respond in Simplified Chinese.",
-            "Korean": " Please respond in Korean.",
-            "Arabic": " Please respond in Arabic."
+            "Spanish": " Always respond in Spanish.",
+            "French": " Always respond in French.",
+            "German": " Always respond in German.",
+            "Italian": " Always respond in Italian.",
+            "Portuguese": " Always respond in Portuguese.",
+            "Japanese": " Always respond in Japanese.",
+            "Chinese (Simplified)": " Always respond in Simplified Chinese.",
+            "Korean": " Always respond in Korean.",
+            "Arabic": " Always respond in Arabic."
         }
         
         language_instruction = language_instructions.get(language, "")
 
-        # System prompt with CoT and structured JSON output
+        # System prompt with function calling awareness
         system_prompt = f"""You are an expert assistant specialized in analyzing user guides and technical documentation.{language_instruction}
 
 ## Your Task:
-Analyze the provided documentation and answer user questions using Chain of Thought reasoning, then return your response in structured JSON format.
+1. Answer user questions based on the provided documentation
+2. If the user wants to contact support AND provides their name and email, use the create_support_ticket function
+3. If they want support but haven't provided complete information, ask them to provide: "Please provide your name and email to create a support ticket"
 
-## Response Format:
-You MUST return your response as valid JSON with this structure:
-{{
-    "reasoning": "Your internal step-by-step thought process (not shown to user)",
-    "answer": "The clear, helpful answer for the user",
-    "confidence": 0.0 to 1.0,
-    "sources": ["List of relevant sections or references from the guide"],
-    "found_in_guide": true or false
-}}
+## Guidelines:
+- Base your answers on the documentation provided
+- Be helpful and accurate
+- Only call create_support_ticket when user explicitly wants support AND has provided both name and email
+- If information is not in the guide, you can suggest contacting support
 
-## Few-Shot Examples:
+## Example Interactions:
 
-Example 1:
-Q: How do I reset the application?
-Response:
-{{
-    "reasoning": "Looking for reset instructions... Found in Settings section under Advanced Options",
-    "answer": "To reset the application: Navigate to Settings > Advanced Options > Reset to Defaults. Click 'Confirm Reset' and restart the application.",
-    "confidence": 0.95,
-    "sources": ["Settings section", "Advanced Options"],
-    "found_in_guide": true
-}}
+Example 1 - Normal question:
+User: "How do I reset the device?"
+Assistant: "To reset the device, go to Settings > Advanced > Reset to Factory Defaults."
 
-Example 2:
-Q: What are the system requirements?
-Response:
-{{
-    "reasoning": "Searching for technical specifications or requirements section in the documentation",
-    "answer": "Minimum requirements: Windows 10+ or macOS 10.15+, 8GB RAM, 50GB storage, internet connection for updates.",
-    "confidence": 1.0,
-    "sources": ["System Requirements section"],
-    "found_in_guide": true
-}}
+Example 2 - Support request with info:
+User: "I need help with a warranty issue. My name is John Doe and email is john@example.com"
+Assistant: [Calls create_support_ticket function]
 
-Example 3:
-Q: Can I use custom themes?
-Response:
-{{
-    "reasoning": "Searched for themes, customization, appearance settings - no relevant information found",
-    "answer": "The documentation doesn't mention custom themes or appearance customization options.",
-    "confidence": 0.8,
-    "sources": [],
-    "found_in_guide": false
-}}
-
-## Important Instructions:
-- Always return valid JSON format
-- Use the "reasoning" field for your Chain of Thought process
-- Keep "answer" field user-friendly and direct
-- Set confidence based on how certain you are
-- List actual section names in "sources"
-- Set "found_in_guide" to false if information is not available"""
+Example 3 - Support request without info:
+User: "I want to contact support"
+Assistant: "I can help you create a support ticket. Please provide your name and email address so our team can contact you.\""""
 
         # Create context with document information
         context = f"User Guide Summary:\n{guide_summary}"
@@ -197,37 +286,103 @@ Remember to return your response in the specified JSON format."""
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt}
             ],
-            max_tokens=400,  # Increased for JSON structure
-            temperature=0.1  # Lower temperature for more factual responses
+            functions=functions,
+            function_call="auto",  # Let the model decide when to call functions
+            max_tokens=400,
+            temperature=0.1
         )
         
-        # Parse JSON response and extract just the answer
-        import json
-        try:
-            response_json = json.loads(response.choices[0].message.content)
+        # Check if the model wants to call a function
+        response_message = response.choices[0].message
+        
+        if response_message.function_call:
+            # The model wants to call a function
+            function_name = response_message.function_call.name
+            function_args = json.loads(response_message.function_call.arguments)
             
-            # Optionally log the reasoning for debugging (without showing to user)
-            if response_json.get("reasoning"):
-                print(f"🧠 CoT Reasoning: {response_json['reasoning']}")
+            print(f"🔧 Function call detected: {function_name}")
+            print(f"📝 Arguments: {function_args}")
             
-            # Return just the clean answer for the user
-            answer = response_json.get("answer", "Unable to generate response")
-            
-            # Optionally append confidence/source info if desired
-            if response_json.get("confidence", 1.0) < 0.5:
-                answer += "\n\n⚠️ Note: Low confidence in this answer."
-            
-            if not response_json.get("found_in_guide", True):
-                answer += "\n\n📝 Note: This information was not found in the guide."
+            if function_name == "create_support_ticket":
+                # Call the actual ticket creation function
+                result = create_support_ticket(
+                    name=function_args.get("name"),
+                    email=function_args.get("email"),
+                    question=function_args.get("issue_description"),
+                    previous_question=previous_question
+                )
                 
-            return answer
+                if result['success']:
+                    # Save ticket to session state
+                    st.session_state.support_tickets.append(result['ticket'])
+                    
+                    # Update previous_question for next interaction
+                    st.session_state.previous_question = question
+                    return f"""✅ {result['message']}
+
+📧 **Contact Information Recorded:**
+- Name: {function_args.get('name')}
+- Email: {function_args.get('email')}
+
+📋 **Issue Description:**
+{function_args.get('issue_description')}
+
+Our support team will review your query and respond within 24-48 hours."""
+                else:
+                    # Update previous_question for next interaction
+                    st.session_state.previous_question = question
+                    return f"❌ {result['message']}"
+        
+        # No function call, parse the JSON response
+        try:
+            # Try to extract JSON from the response (handle markdown code blocks)
+            content = response_message.content.strip()
+            if content.startswith('```json'):
+                content = content[7:]  # Remove ```json
+                if content.endswith('```'):
+                    content = content[:-3]  # Remove closing ```
+            elif content.startswith('```'):
+                content = content[3:]  # Remove opening ```
+                if content.endswith('```'):
+                    content = content[:-3]  # Remove closing ```
             
-        except json.JSONDecodeError:
-            # Fallback to raw response if JSON parsing fails
-            print("⚠️ JSON parsing failed, returning raw response")
-            return response.choices[0].message.content
+            # Parse the JSON response
+            response_json = json.loads(content)
+            
+            # Log the reasoning internally (visible in terminal/logs)
+            if response_json.get('reasoning'):
+                print(f"🧠 Reasoning: {response_json['reasoning']}")
+            
+            # Get the answer from the JSON - try both 'answer' and 'response' fields
+            answer = response_json.get('answer') or response_json.get('response', response_message.content)
+            
+            # Add confidence indicator if low confidence
+            confidence = response_json.get('confidence', 1.0)
+            if confidence < 0.7:
+                answer = f"⚠️ *Note: Lower confidence answer*\n\n{answer}"
+            
+            # Add sources if available
+            sources = response_json.get('sources', [])
+            if sources:
+                answer += f"\n\n📚 **Sources:** {', '.join(sources)}"
+            
+            # Add note if not found in guide
+            if response_json.get('found_in_guide') == False:
+                answer += "\n\n📌 *Note: This information was not explicitly found in the user guide.*"
+            
+            # Update previous_question for next interaction
+            st.session_state.previous_question = question
+            return answer
+        except (json.JSONDecodeError, KeyError) as e:
+            # If it's not JSON or has unexpected structure, return the content as-is (fallback)
+            print(f"⚠️ Could not parse JSON: {e}")
+            # Update previous_question for next interaction
+            st.session_state.previous_question = question
+            return response_message.content
         
     except Exception as e:
+        # Still update previous_question even on error
+        st.session_state.previous_question = question
         return f"❌ Error answering question: {str(e)}"
 
 def detect_question_language(client, question, model="gpt-4o-mini"):
@@ -555,6 +710,22 @@ def main():
                         mime="text/plain"
                     )
             
+            # Support Tickets Viewer (Admin Section)
+            if st.session_state.support_tickets:
+                with st.expander("🎫 Support Tickets", expanded=False):
+                    st.markdown("**Customer Support Requests:**")
+                    for ticket in st.session_state.support_tickets:
+                        st.markdown(f"""
+                        **Ticket ID:** {ticket['id']}  
+                        **Name:** {ticket['name']}  
+                        **Email:** {ticket['email']}  
+                        **Question:** {ticket['question']}  
+                        **Previous Context:** {ticket.get('previous_question', 'N/A')}  
+                        **Status:** {ticket['status']}  
+                        **Time:** {ticket['timestamp']}
+                        """)
+                        st.markdown("---")
+            
             # Suggested questions
             if st.session_state.summary and not st.session_state.chat_history:
                 st.markdown("### 💡 Suggested Questions (Multi-Language)")
@@ -563,7 +734,8 @@ def main():
                     "¿Cuáles son las características principales descritas en esta guía?",
                     "Quelles sont les procédures étape par étape?",
                     "Welche wichtigen Konfigurationsschritte gibt es?",
-                    "このガイドの主要な機能は何ですか？"
+                    "このガイドの主要な機能は何ですか？",
+                    "I need to contact support. My name is John Doe and email is john@example.com"
                 ]
                 
                 cols = st.columns(2)
