@@ -116,23 +116,60 @@ def answer_question(client, question, guide_summary, guide_document="", language
             "Arabic": " Please respond in Arabic."
         }
         
-        # Create context-aware prompt
+        language_instruction = language_instructions.get(language, "")
+
+        # System prompt with CoT and few-shot examples
+        system_prompt = f"""You are an expert assistant specialized in analyzing user guides and technical documentation.{language_instruction}
+
+## Your Approach (Chain of Thought):
+1. First, identify the relevant sections in the provided documentation
+2. Think through the answer step-by-step
+3. Provide a clear, accurate, and helpful response
+4. When possible, reference specific parts of the guide
+
+## Few-Shot Examples:
+
+Example 1:
+Q: How do I reset the application to default settings?
+Thought Process: I need to look for reset, restore, or default settings instructions in the guide.
+Answer: According to the user guide, to reset the application: Navigate to Settings > Advanced Options > Reset to Defaults. Click "Confirm Reset" and restart the application.
+
+Example 2:
+Q: What are the system requirements?
+Thought Process: I should find technical specifications or requirements section.
+Answer: The guide specifies these minimum requirements: Operating System: Windows 10 or later / macOS 10.15+, Memory: 8GB RAM, Storage: 50GB available space, Internet connection for updates.
+
+Example 3:
+Q: Can I use this feature offline?
+Thought Process: I need to check for offline capabilities or internet requirements mentioned in the guide.
+Answer: Based on the documentation, most features work offline after initial setup. However, cloud sync and automatic updates require an internet connection.
+
+## Important Instructions:
+- Base your answers strictly on the provided documentation
+- If information is not in the guide, clearly state that
+- Be concise but complete in your responses
+- Use step-by-step instructions when describing procedures"""
+
+        # Create context with document information
         context = f"User Guide Summary:\n{guide_summary}"
         if guide_document:
             context += f"\n\nOriginal Document:\n{guide_document[:2000]}..." if len(guide_document) > 2000 else f"\n\nOriginal Document:\n{guide_document}"
         
-        language_instruction = language_instructions.get(language, "")
-        prompt = f"""Based on the following user guide information, please answer the user's question accurately and concisely.{language_instruction}
+        # User prompt with context and question
+        user_prompt = f"""Here is the documentation context:
 
 {context}
 
 User Question: {question}
 
-Answer:"""
+Please provide your answer using the Chain of Thought approach described in your instructions."""
         
         response = client.chat.completions.create(
             model=model,
-            messages=[{"role": "user", "content": prompt}],
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ],
             max_tokens=300,
             temperature=0.1  # Lower temperature for more factual responses
         )
