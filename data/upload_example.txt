@@ -1,0 +1,189 @@
+
+ 
+
+
+The goal of this template is to give a structure for the user guide. Its presentation is not user-friendly. Add you cover page, logo, look-and-feel etc…
+
+Add also the CE Mark on the cover page, if necessary.
+The identification of the document shall also be clear, add the identifier and revision date of the document on the cover page or somewhere where it is easily visible.
+
+
+TABLE OF CONTENTS
+
+1	Introduction	2
+1.1	Conventions	2
+1.2	Intended use	2
+2	Precautions	2
+2.1	Compliant Use	2
+2.2	Safety instructions	3
+2.2.1	Electromagnetic interferences	3
+2.2.2	Electrical connection	3
+2.2.3	Environment	3
+2.2.4	Storage conditions	3
+2.3	Malfunction	4
+3	Installation	4
+4	Getting started	4
+5	Advanced functions	4
+6	Maintenance	4
+7	Cleaning and Disinfection	4
+8	Error Messages, troubleshooting	4
+9	Bibliography	5
+10	Warranty	5
+11	Legal Notices	5
+11.1	Disclaimer	5
+11.2	Copyrights and trademarks	5
+12	Manufacturer Contact Information	5
+
+
+
+ 
+1	Introduction
+This document is the user guide for XXX, a device designed by <your company>.
+It is recommended that you read this instruction manual carefully before use.
+If your software uses accessories, give the list below
+This product can only be used with accessories delivered by <your company>:
+•	List of accessories with references
+•	An accessory
+•	Another accessory
+The use of any other accessories is forbidden.
+Please, read carefully the precautions with   symbols, to ensure that the device is used in best conditions and in complete safety.
+1.1	Conventions
+Typographical convention.
+Any other convention.
+
+To avoid all physical and material damage, this document splits safety instructions into 3 danger levels.
+ 	ATTENTION
+	Hazardous situation which can cause material damage or lead to moderate serious injury.
+
+ 	WARNING
+	Hazardous situation which can cause serious/ fatal injury.
+
+
+
+
+ 
+	Hazardous situation which could immediately cause serious/ fatal injury.
+
+1.2	Intended use
+Add here the intended use of your device
+
+2	Precautions
+2.1	Compliant Use
+The use of this device is reserved to XXX (give the specialty of physicians or if they need a training or an education level), or under their control.
+Any inappropriate use is forbidden.
+
+The user shall:
+•	Only use non-defective products.
+•	Protect patients, third parties, other operators, assistants and themselves from all danger.
+•	Avoid all contamination by the product (remove this if you don’t sell hardware).
+The user must check the safety of operation and the condition of the device before each use.
+
+Verify that the product is operational at all times and keep it in good working conditions.
+
+Only <your company> technicians are authorized to repair <your company> products.
+
+2.2	Safety instructions
+Add any instructions related to safety, especially mitigations actions from risk analysis
+2.2.1	Electromagnetic interferences
+If you sell hardware + software, then this part is important. If you sell only software you can remove it.
+Example of safety instruction, add any other safety instruction:
+The device is certified compliant with current electromagnetic compatibility standards.
+
+ 	ATTENTION
+	Users should ensure that no electromagnetic interference raises an additional risk.
+So as not to disturb the proper operation of electromagnetic devices, it is recommended complying with the recommended separation distances for the device. ( give separation distances)
+
+2.2.2	Electrical connection
+If you sell hardware + software, then this part is important. If you sell only software you can remove it
+Example of safety instruction, add any other safety instruction:
+
+
+
+
+ 
+	DANGER
+Bad electrical connection - ELECTRIC SHOCK - ELECTROCUTION
+
+Check that the supply voltage is the same as that shown on the device. Check the supply cable before each use.
+Never plug or unplug the device to/from a wall socket with damp hands.
+Any other use or connection of devices or peripherals to a port (USB, serial, parallel …) may create new risks and may require additional risk analysis
+2.2.3	Environment
+If you sell hardware + software, then this part is important. If you sell only software you can remove it.
+Add safety instructions about environment, like presence of explosive gases (anesthetics), fluids, temperature, mechanical constraints …
+2.2.4	Storage conditions
+If you sell hardware + software, then this part is important. If you sell only software you can remove it.
+Add safety instructions about recommended storage conditions …
+2.3	Malfunction
+In case of malfunction:
+•	Immediately stop using the device.
+•	Try to identify or eliminate the cause using the description in this document (section Error messages, troubleshooting).
+•	If it is not possible to identify or eliminate the cause using this document, switch the device off and call <your company> After-Sales Department (see Manufacturer section at the end of this document).
+
+3	Installation - unistallation
+Optional, you may remove this section and describe installation in a separate installation manual
+Describe the installation and uninstallation of the hardware and software. Hardware and/or software installation may be only realized by technicians of your company. In this case, remove this section and describe installation in another (internal?) document.
+4	Getting started
+First use of software by the user, explain main and/or simple use cases, and main workflow.
+
+
+
+5	Advanced functions
+Advanced use, describe more complex use cases and/or secondary functions
+
+
+
+6	Maintenance
+Optional, you may remove this section and describe installation in a separate maintenance/administrator’s manual
+Describe the maintenance of the hardware and software. Hardware and/or software maintenance may be only realized by technicians of your company. In this case, remove this section and describe installation in another (internal?) document.
+
+7	Cleaning and Disinfection
+If you sell hardware which shall be cleans and disinfected. Otherwise you can remove it.
+You may rename this section “Cleaning, Disinfection and Sterilization” is you have instructions about sterilization.
+
+Describe how the device shall be cleaned and disinfected. Is your hardware protected by screens, sheaths, if it is a medical PC, how to clean the screen, the mouse & keyboard … 
+8	Troubleshooting, Error Messages
+
+ 	This section is intended to help users, should a problem occur.
+
+In the event of abnormal operation, immediately stop using the device and call <your company> After-Sales Dept.
+If it is not possible to locate or eliminate the problem using this section, or if the dysfunction is still present, switch off the device and call <your company> After-Sales Dept.
+
+ 
+
+DANGER
+Never try to repair this device alone
+
+
+
+
+Error message	Description
+Your error message	Description of the error and how to fix it, if possible
+Not enough disk space (err 123)	Empty disk using xxxx
+
+
+Malfunction	Causes	Solutions
+The malfunction	•	The cause	•	The solution, if any, or call after-sales
+The PC doesn’t start	•	It is unplugged	•	Plug it to main (I Love this one !!!)
+9	Bibliography
+Optional. Add here bibliography, clinical data that are relevant to the use of the device.
+10	Warranty
+Warranty terms and conditions. Not optional! …
+11	Legal Notices
+Optional, ask your legal advisory!
+11.1	Disclaimer
+Optional. The disclaimer is usual in software industry and is also often shown during software installation…
+11.2	Copyrights and trademarks
+Optional. Add your copyrights and trademarks
+
+Add sentences like:
+Windows is a registered trademark of Microsoft Corporation in the USA and other countries.
+
+12	Manufacturer Contact Information
+ 
+<Your Company>
+Address
+ZIP Code
+Country
+Contact Phone
+Fax
+
