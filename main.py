@@ -18,6 +18,79 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+def scroll_to_bottom():
+    st.markdown(
+        """
+        <script>
+        var chatContainer = window.parent.document.querySelector('.stChatMessageContainer');
+        if (chatContainer) {
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+        } else {
+            window.scrollTo(0, document.body.scrollHeight);
+        }
+        </script>
+        """,
+        unsafe_allow_html=True,
+    )
+
+st.markdown(
+    f'''
+    <style>
+        .block-container {{
+            padding: {1}rem !important;
+        }}
+        .stChatMessageContainer {{
+            overflow-y: auto;
+            scroll-behavior: smooth;
+        }}
+        .stChatMessageContainer > div:last-child {{
+            margin-bottom: 80px;
+        }}
+    </style>
+    ''',unsafe_allow_html=True)
+
+
+# Define available functions for OpenAI
+function_definitions = [{
+    "type": "function",
+    "function": {
+        "name": "create_support_ticket",
+        "description": "Submit a support ticket for further assistance if user provided question cannot be answered, when the user provides enough contact details including name and email",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": "The customer's full name"
+                },
+                "email": {
+                    "type": "string",
+                    "description": "The customer's email address"
+                },
+                "issue_description": {
+                    "type": "string",
+                    "description": "The question or issue the person is experiencing, getting from the 'Conversation history' where the question you cannot answered, or the current user requested support question"
+                }
+            },
+            "required": ["name", "email", "issue_description"]
+        }
+    }
+}]
+
+# Language-specific instructions
+language_instructions = {
+    "English": "",
+    "Spanish": " Please respond in Spanish.",
+    "French": " Please respond in French.",
+    "German": " Please respond in German.",
+    "Italian": " Please respond in Italian.",
+    "Portuguese": " Please respond in Portuguese.",
+    "Japanese": " Please respond in Japanese.",
+    "Chinese (Simplified)": " Please respond in Simplified Chinese.",
+    "Korean": " Please respond in Korean.",
+    "Arabic": " Please respond in Arabic."
+}
+
 # Initialize session state
 if 'summary' not in st.session_state:
     st.session_state.summary = ""
@@ -89,53 +162,6 @@ def create_support_ticket(name, email, question, previous_question=""):
             "message": f"Failed to create support ticket: {str(e)}"
         }
 
-def detect_support_request(question):
-    """Detect if the user wants to contact customer support and extract contact info"""
-    
-    # Pattern to detect support request intent
-    support_patterns = [
-        r"contact.*support",
-        r"contact.*customer",
-        r"need.*help.*email",
-        r"reach.*support",
-        r"talk.*to.*support",
-        r"liên hệ.*hỗ trợ",  # Vietnamese
-        r"cần.*trợ giúp",    # Vietnamese
-    ]
-    
-    # Check if it's a support request
-    is_support_request = any(re.search(pattern, question, re.IGNORECASE) for pattern in support_patterns)
-    
-    if not is_support_request:
-        return None
-    
-    # Extract email pattern
-    email_pattern = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
-    email_match = re.search(email_pattern, question)
-    email = email_match.group(0) if email_match else None
-    
-    # Extract name (simple heuristic - words after "name is" or "I am" or similar)
-    name_patterns = [
-        r"(?:my name is|i am|i'm|name:|tên:|tôi là)\s+([A-Za-z]+(?:\s+[A-Za-z]+)?)",
-        r"([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\s+(?:here|writing)",
-    ]
-    
-    name = None
-    for pattern in name_patterns:
-        match = re.search(pattern, question, re.IGNORECASE)
-        if match:
-            name = match.group(1).strip()
-            break
-    
-    # If we found both name and email, return the info
-    if name and email:
-        return {
-            "name": name,
-            "email": email,
-            "original_question": question
-        }
-    
-    return None
 
 def summarize_user_guide(client, text, summary_style="concise", max_tokens=300, temperature=0.3, language="English", model="gpt-4o-mini"):
     """Generate user guide summary using Azure OpenAI"""
@@ -196,62 +222,26 @@ def answer_question(client, question, guide_summary, guide_document="", language
         # Get the previous question BEFORE updating it
         previous_question = st.session_state.get('previous_question', '')
 
-        # Define available functions for OpenAI
-        functions = [
-            {
-                "name": "create_support_ticket",
-                "description": "Create a customer support ticket when user wants to contact support and provides their name and email",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "name": {
-                            "type": "string",
-                            "description": "The customer's full name"
-                        },
-                        "email": {
-                            "type": "string",
-                            "description": "The customer's email address"
-                        },
-                        "issue_description": {
-                            "type": "string",
-                            "description": "Description of the issue or question"
-                        }
-                    },
-                    "required": ["name", "email", "issue_description"]
-                }
-            }
-        ]
-
-        # Language-specific instructions
-        language_instructions = {
-            "English": "",
-            "Spanish": " Please respond in Spanish.",
-            "French": " Please respond in French.",
-            "German": " Please respond in German.",
-            "Italian": " Please respond in Italian.",
-            "Portuguese": " Please respond in Portuguese.",
-            "Japanese": " Please respond in Japanese.",
-            "Chinese (Simplified)": " Please respond in Simplified Chinese.",
-            "Korean": " Please respond in Korean.",
-            "Arabic": " Please respond in Arabic."
-        }
-
         language_instruction = language_instructions.get(language, "")
 
         # System prompt with Chain of Thought reasoning (from merege-code.py)
-        system_prompt = f"""You are a helpful reasoning assistant.
-You are a reasoning AI assistant.{language_instruction}
+        system_prompt = f"""You are a reasoning AI assistant.{language_instruction}
 Follow these steps for every answer:
-1. Analyze the question carefully.
-2. Think step-by-step (reason privately).
-3. Produce a clear, final answer.
+1. Analyze the question carefully, include subject, context, relationships, and any relevant details.
+2. Think step-by-step.
+3. Produce a clear, final answer if possible.
+
 For each question, respond as JSON:
 {{
-  "reasoning": "step-by-step explanation",
-  "answer": "final concise answer"
+  "reasoning": "step-by-step explanation based on the guideline above",
+  "answer": "final concise answer",
+  "confidence": "confidence level from 0.0 to 1.0",
 }}
 
-IMPORTANT: If the user wants to contact support AND provides their name and email, use the create_support_ticket function instead of JSON response."""
+IMPORTANT: 
+- If you you cannot answer, or the information is not found, ask if user wants to contact support, and also ask their name and email if unknown, **do not make up an example user and email, ask user to provide if missing**.
+- If the user wants to contact support, ask for their name and email if unknown, then use the create_support_ticket function to create a support ticket.
+- When you decide to call tool, also include the JSON response as specified above."""
 
         # Few-shot examples (from merege-code.py)
         few_shot_examples = [
@@ -350,7 +340,7 @@ IMPORTANT: If the user wants to contact support AND provides their name and emai
 
         # Add few-shot examples
         for ex in few_shot_examples:
-            ex_prompt = f"""Based on the following user guide information, please answer the user's question accurately and concisely.{language_instruction}
+            ex_prompt = f"""Based on the following user guide information, please answer the user's question accurately and concisely.
 
 {ex["context"]}
 
@@ -365,11 +355,16 @@ Answer:"""
             messages.append({"role": "assistant", "content": json.dumps(ex_response, ensure_ascii=False)})
 
         # User prompt with context and question
+        history = st.session_state.chat_history
+        previous_questions = [f"{content['role']}: {content['content']}" for content in history[:-1]]
         user_prompt = f"""Based on the following user guide information, please answer the user's question accurately and concisely.{language_instruction}
 
 {context}
 
-User Question: {question}
+Conversation history: 
+{','.join(previous_questions)}
+
+Current User Question: {question}
 
 Answer:"""
 
@@ -379,19 +374,21 @@ Answer:"""
         response = client.chat.completions.create(
             model=model,
             messages=messages,
-            functions=functions,
-            function_call="auto",  # Let the model decide when to call functions
-            max_tokens=400,
-            temperature=0.1
+            tools=function_definitions,
+            tool_choice='auto',
+            max_tokens=1000,
+            response_format={"type": "json_object"},
+            temperature=0.2
         )
         
         # Check if the model wants to call a function
         response_message = response.choices[0].message
+        print(response_message)
         
-        if response_message.function_call:
+        if response_message.tool_calls:
             # The model wants to call a function
-            function_name = response_message.function_call.name
-            function_args = json.loads(response_message.function_call.arguments)
+            function_name = response_message.tool_calls[0].function.name
+            function_args = json.loads(response_message.tool_calls[0].function.arguments)
             
             print(f"🔧 Function call detected: {function_name}")
             print(f"📝 Arguments: {function_args}")
@@ -404,6 +401,13 @@ Answer:"""
                     question=function_args.get("issue_description"),
                     previous_question=previous_question
                 )
+                function_called = {
+                    "function_called": function_name,
+                    "name": function_args.get("name"),
+                    "email": function_args.get("email"),
+                    "issue_description": function_args.get("issue_description"),
+                    "ticket_id": result.get('ticket_id')
+                }
                 
                 if result['success']:
                     # Save ticket to session state
@@ -411,7 +415,8 @@ Answer:"""
                     
                     # Update previous_question for next interaction
                     st.session_state.previous_question = question
-                    return f"""✅ {result['message']}
+                    return (
+                        f"""✅ {result['message']}
 
 📧 **Contact Information Recorded:**
 - Name: {function_args.get('name')}
@@ -420,34 +425,40 @@ Answer:"""
 📋 **Issue Description:**
 {function_args.get('issue_description')}
 
-Our support team will review your query and respond within 24-48 hours."""
+Our support team will review your query and respond within 24-48 hours.""", 
+                        None, 
+                        function_called
+                    )
                 else:
                     # Update previous_question for next interaction
                     st.session_state.previous_question = question
-                    return f"❌ {result['message']}"
+                    return (
+                        f"❌ {result['message']}",
+                        None, 
+                        function_called
+                    )
         
         # No function call, parse the JSON response
         try:
-            # Try to extract JSON from the response (handle markdown code blocks)
-            content = response_message.content.strip()
-            if content.startswith('```json'):
-                content = content[7:]  # Remove ```json
-                if content.endswith('```'):
-                    content = content[:-3]  # Remove closing ```
-            elif content.startswith('```'):
-                content = content[3:]  # Remove opening ```
-                if content.endswith('```'):
-                    content = content[:-3]  # Remove closing ```
-            
+            response_json = json.loads(response.choices[0].message.content)
+        except Exception:
+            print("⚠️ Could not parse JSON response")
+            response_json = {
+                "reasoning": None,
+                "answer": response_message.content
+            }
+
+        try:
             # Parse the JSON response
-            response_json = json.loads(content)
+            response_json = json.loads(response.choices[0].message.content)
 
             # Log the reasoning internally (visible in terminal/logs)
-            if response_json.get('reasoning'):
-                print(f"🧠 Reasoning: {response_json['reasoning']}")
+            reasoning = response_json.get('reasoning', None)
+            if reasoning:
+                print(f"🧠 Reasoning: {reasoning}")
 
             # Get the answer from the JSON - try both 'answer' and 'response' fields
-            answer = response_json.get('answer') or response_json.get('response', response_message.content)
+            answer = response_json.get('answer', response_message.content)
 
             # Check if information was not found and suggest support contact
             fallback_keywords = [
@@ -464,7 +475,7 @@ Our support team will review your query and respond within 24-48 hours."""
 
             # Add confidence indicator if low confidence
             confidence = response_json.get('confidence', 1.0)
-            if confidence < 0.7:
+            if float(confidence) < 0.5:
                 answer = f"⚠️ *Note: Lower confidence answer*\n\n{answer}"
 
             # Add sources if available
@@ -473,7 +484,7 @@ Our support team will review your query and respond within 24-48 hours."""
                 answer += f"\n\n📚 **Sources:** {', '.join(sources)}"
 
             # Add note if not found in guide with support contact suggestion
-            if response_json.get('found_in_guide') == False or info_not_found:
+            if info_not_found:
                 answer += "\n\n📌 *Note: This information was not explicitly found in the user guide.*"
                 answer += "\n\n💡 **Need more help?** Contact our support team by providing:"
                 answer += "\n- Your **name**"
@@ -482,18 +493,19 @@ Our support team will review your query and respond within 24-48 hours."""
 
             # Update previous_question for next interaction
             st.session_state.previous_question = question
-            return answer
+            return answer, reasoning, None
         except (json.JSONDecodeError, KeyError) as e:
             # If it's not JSON or has unexpected structure, return the content as-is (fallback)
             print(f"⚠️ Could not parse JSON: {e}")
             # Update previous_question for next interaction
             st.session_state.previous_question = question
-            return response_message.content
+            return response_message.content, None, None
         
     except Exception as e:
         # Still update previous_question even on error
         st.session_state.previous_question = question
-        return f"❌ Error answering question: {str(e)}"
+        print(f"❌ Error answering question: {str(e)}")
+        return f"❌ Error answering question: {str(e)}", None, None
 
 def detect_question_language(client, question, model="gpt-4o-mini"):
     """Detect the language of the user's question using AI"""
@@ -565,6 +577,18 @@ def answer_question_auto_lang(client, question, guide_summary, guide_document=""
     except Exception as e:
         return f"❌ Error answering question: {str(e)}"
 
+def display_assistant_response(answer, reasoning=None, tool_call=None):
+    with st.chat_message("assistant"):
+        st.markdown(answer)
+        if reasoning:
+            # show reasoning in an expander (toggle controlled by session state)
+            with st.expander("Show reasoning", expanded=False):
+                st.markdown(reasoning)
+        if tool_call:
+            # show tool_call in an expander (toggle controlled by session state)
+            with st.expander("Show tool_call", expanded=False):
+                st.code(tool_call)
+
 def main():
     # Header
     st.title("🔍 User Guide Summarization")
@@ -618,7 +642,7 @@ def main():
         st.stop()
     
     # Main content area with tabs
-    tab1, tab2 = st.tabs(["🔍 User Guide Summary", "💬 Q&A Chatbot"])
+    tab1, tab2, tab3 = st.tabs(["🔍 User Guide Summary", "💬 Q&A Chatbot", "🎫 Support Questions"])
     
     with tab1:
         col1, col2 = st.columns([1, 1])
@@ -746,51 +770,84 @@ def main():
             # Chat interface
             st.markdown("**Ask questions about the user guide:**")
             st.info("💡 **Smart Language Detection**: Ask questions in any supported language, and I'll respond in the same language! The configured language above is used for summaries only.")
-            
+            chat_container = st.container()
+
             # Display chat history
-            if st.session_state.chat_history:
-                st.markdown("### 💬 Conversation History")
-                
-                for i, (question, answer) in enumerate(st.session_state.chat_history):
-                    # User question
-                    st.markdown(f"**👤 You:** {question}")
-                    # Bot answer
-                    st.markdown(f"**🤖 Assistant:** {answer}")
-                    st.markdown("---")
-            
-            # Question input
-            col_input, col_ask = st.columns([4, 1])
-            
-            with col_input:
-                question = st.text_input(
-                    "Ask a question:",
-                    placeholder="e.g., How do I configure this feature? | ¿Cómo configuro esta característica? | Comment configurer cette fonctionnalité?",
-                    key="question_input"
-                )
-            
-            with col_ask:
-                st.markdown("<br>", unsafe_allow_html=True)  # Align button with input
-                ask_button = st.button("🚀 Ask", type="primary")
-            
+            with chat_container:
+                if len(st.session_state.chat_history) > 0:
+                    st.markdown("### 💬 Conversation History")
+                    # Display chat messages from history on app rerun
+                    for i, message in enumerate(st.session_state.chat_history):
+                        if (message["role"] == "assistant"):
+                            print(message)
+                            reasoning = message.get("reasoning")
+                            tool_call = message.get("tool_call")
+                            answer = message["content"]
+                            display_assistant_response(answer, reasoning, tool_call)
+                        else:
+                            with st.chat_message(message["role"]):
+                                st.markdown(message["content"])
+
+                else:
+                    # Suggested questions
+                    if st.session_state.summary and len(st.session_state.chat_history) == 0:
+                        st.markdown("### 💡 Suggested Questions (Multi-Language)")
+                        suggested_questions = [
+                            "What are the main features described in this guide?",
+                            "¿Cuáles son las características principales descritas en esta guía?",
+                            "Quelles sont les procédures étape par étape?",
+                            "Welche wichtigen Konfigurationsschritte gibt es?",
+                            "このガイドの主要な機能は何ですか？"
+                        ]
+
+                        cols = st.columns(2)
+                        for i, suggestion in enumerate(suggested_questions):
+                            with cols[i % 2]:
+                                if st.button(f"💭 {suggestion}", key=f"suggestion_{i}"):
+                                    # Set the question and trigger ask
+                                    if client:
+                                        st.session_state.chat_history.append({"role": "user", "content": suggestion})
+                                        with st.chat_message("user"):
+                                            st.markdown(suggestion)
+                                        with st.spinner("🤔 Thinking..."):
+                                            # Use auto-detection for suggested questions too
+                                            answer, reasoning, tool_call = answer_question_auto_lang(
+                                                client,
+                                                suggestion,
+                                                st.session_state.summary,
+                                                st.session_state.last_input,
+                                                language,  # fallback language
+                                                model
+                                            )
+                                            display_assistant_response(answer, reasoning, tool_call)
+                                            st.session_state.chat_history.append({"role": "assistant", "content": answer, "reasoning": reasoning, "tool_call": tool_call})
+                                            st.rerun()
+
             # Process question
-            if ask_button and question:
+            question = st.chat_input("e.g., How do I configure this feature? | ¿Cómo configuro esta característica? | Comment configurer cette fonctionnalité?")
+
+            if question:
                 if client:
-                    with st.spinner("🤔 Thinking..."):
-                        # Use auto-detection for chatbot, but keep manual language for summaries
-                        answer = answer_question_auto_lang(
-                            client, 
-                            question, 
-                            st.session_state.summary, 
-                            st.session_state.last_input,
-                            language,  # fallback language
-                            model
-                        )
-                        
-                        # Add to chat history
-                        st.session_state.chat_history.append((question, answer))
-                        
+                    st.session_state.chat_history.append({"role": "user", "content": question})
+                    with chat_container:
+                        with st.chat_message("user"):
+                            st.markdown(question)
+                        with st.spinner("🤔 Thinking..."):
+                            # Use auto-detection for chatbot, but keep manual language for summaries
+                            answer, reasoning, tool_call = answer_question_auto_lang(
+                                client,
+                                question,
+                                st.session_state.summary,
+                                st.session_state.last_input,
+                                language,  # fallback language
+                                model
+                            )
+                            # Add assistant response to chat history
+                            display_assistant_response(answer, reasoning, tool_call)
+                            st.session_state.chat_history.append({"role": "assistant", "content": answer, "reasoning": reasoning, "tool_call": tool_call})
+                            scroll_to_bottom()
                         # Clear input and rerun to show new message
-                        st.rerun()
+                        # st.rerun()
                 else:
                     st.error("❌ Unable to process question. Please check your API configuration.")
             
@@ -809,64 +866,35 @@ def main():
                     chat_export += f"User Guide Summary:\n{st.session_state.summary}\n\n"
                     chat_export += "Conversation:\n" + "-"*30 + "\n"
                     
-                    for i, (q, a) in enumerate(st.session_state.chat_history, 1):
-                        chat_export += f"Q{i}: {q}\n"
-                        chat_export += f"A{i}: {a}\n\n"
-                    
+                    for i, message in enumerate(st.session_state.chat_history, 1):
+                        if message['role'] == 'user':
+                            chat_export += "\n" + "-"*80 + "\n"
+                        chat_export += f"{'User' if message['role'] == 'user' else 'Assistant'}: {message['content']}\n"
+
                     st.download_button(
                         label="💾 Export Chat",
                         data=chat_export.encode('utf-8'),
                         file_name="user_guide_qa_session.txt",
                         mime="text/plain"
                     )
-            
+
+        with tab3:
+            st.header("🎫 Support Questions")    
             # Support Tickets Viewer (Admin Section)
             if st.session_state.support_tickets:
-                with st.expander("🎫 Support Tickets", expanded=False):
-                    st.markdown("**Customer Support Requests:**")
-                    for ticket in st.session_state.support_tickets:
-                        st.markdown(f"""
-                        **Ticket ID:** {ticket['id']}  
-                        **Name:** {ticket['name']}  
-                        **Email:** {ticket['email']}  
-                        **Question:** {ticket['question']}  
-                        **Previous Context:** {ticket.get('previous_question', 'N/A')}  
-                        **Status:** {ticket['status']}  
-                        **Time:** {ticket['timestamp']}
-                        """)
-                        st.markdown("---")
+                st.markdown("**Customer Support Requests:**")
+                for ticket in st.session_state.support_tickets:
+                    st.markdown(f"""
+                    **Ticket ID:** {ticket['id']}  
+                    **Name:** {ticket['name']}  
+                    **Email:** {ticket['email']}  
+                    **Question:** {ticket['question']}  
+                    **Previous Context:** {ticket.get('previous_question', 'N/A')}  
+                    **Status:** {ticket['status']}  
+                    **Time:** {ticket['timestamp']}
+                    """)
+                    st.markdown("---")
             
-            # Suggested questions
-            if st.session_state.summary and not st.session_state.chat_history:
-                st.markdown("### 💡 Suggested Questions (Multi-Language)")
-                suggested_questions = [
-                    "What are the main features described in this guide?",
-                    "¿Cuáles son las características principales descritas en esta guía?",
-                    "Quelles sont les procédures étape par étape?",
-                    "Welche wichtigen Konfigurationsschritte gibt es?",
-                    "このガイドの主要な機能は何ですか？",
-                    "I need to contact support. My name is John Doe and email is john@example.com"
-                ]
-                
-                cols = st.columns(2)
-                for i, suggestion in enumerate(suggested_questions):
-                    with cols[i % 2]:
-                        if st.button(f"💭 {suggestion}", key=f"suggestion_{i}"):
-                            # Set the question and trigger ask
-                            if client:
-                                with st.spinner("🤔 Thinking..."):
-                                    # Use auto-detection for suggested questions too
-                                    answer = answer_question_auto_lang(
-                                        client, 
-                                        suggestion, 
-                                        st.session_state.summary, 
-                                        st.session_state.last_input,
-                                        language,  # fallback language
-                                        model
-                                    )
-                                    
-                                    st.session_state.chat_history.append((suggestion, answer))
-                                    st.rerun()
 
 if __name__ == "__main__":
     main()

@@ -43,7 +43,7 @@ pip install -r requirements.txt
 **Streamlit Web App:**
 
 ```bash
-streamlit run app.py
+streamlit run main.py
 ```
 
 **Command Line Version:**
