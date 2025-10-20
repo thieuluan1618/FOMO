@@ -185,17 +185,17 @@ def summarize_user_guide(client, text, summary_style="concise", max_tokens=300, 
         return f"❌ Error generating summary: {str(e)}"
 
 def answer_question(client, question, guide_summary, guide_document="", language="English", model="gpt-4o-mini"):
-    """Answer questions about the user guide using native OpenAI function calling"""
+    """Answer questions about the user guide using native OpenAI function calling with Chain of Thought reasoning"""
     try:
         if not question.strip():
             return "⚠️ Please ask a question about the user guide."
-        
+
         if not guide_summary.strip():
             return "⚠️ No guide summary available. Please generate a summary first."
-        
+
         # Get the previous question BEFORE updating it
         previous_question = st.session_state.get('previous_question', '')
-        
+
         # Define available functions for OpenAI
         functions = [
             {
@@ -221,71 +221,164 @@ def answer_question(client, question, guide_summary, guide_document="", language
                 }
             }
         ]
-        
+
         # Language-specific instructions
         language_instructions = {
             "English": "",
-            "Spanish": " Always respond in Spanish.",
-            "French": " Always respond in French.",
-            "German": " Always respond in German.",
-            "Italian": " Always respond in Italian.",
-            "Portuguese": " Always respond in Portuguese.",
-            "Japanese": " Always respond in Japanese.",
-            "Chinese (Simplified)": " Always respond in Simplified Chinese.",
-            "Korean": " Always respond in Korean.",
-            "Arabic": " Always respond in Arabic."
+            "Spanish": " Please respond in Spanish.",
+            "French": " Please respond in French.",
+            "German": " Please respond in German.",
+            "Italian": " Please respond in Italian.",
+            "Portuguese": " Please respond in Portuguese.",
+            "Japanese": " Please respond in Japanese.",
+            "Chinese (Simplified)": " Please respond in Simplified Chinese.",
+            "Korean": " Please respond in Korean.",
+            "Arabic": " Please respond in Arabic."
         }
-        
+
         language_instruction = language_instructions.get(language, "")
 
-        # System prompt with function calling awareness
-        system_prompt = f"""You are an expert assistant specialized in analyzing user guides and technical documentation.{language_instruction}
+        # System prompt with Chain of Thought reasoning (from merege-code.py)
+        system_prompt = f"""You are a helpful reasoning assistant.
+You are a reasoning AI assistant.{language_instruction}
+Follow these steps for every answer:
+1. Analyze the question carefully.
+2. Think step-by-step (reason privately).
+3. Produce a clear, final answer.
+For each question, respond as JSON:
+{{
+  "reasoning": "step-by-step explanation",
+  "answer": "final concise answer"
+}}
 
-## Your Task:
-1. Answer user questions based on the provided documentation
-2. If the user wants to contact support AND provides their name and email, use the create_support_ticket function
-3. If they want support but haven't provided complete information, ask them to provide: "Please provide your name and email to create a support ticket"
+IMPORTANT: If the user wants to contact support AND provides their name and email, use the create_support_ticket function instead of JSON response."""
 
-## Guidelines:
-- Base your answers on the documentation provided
-- Be helpful and accurate
-- Only call create_support_ticket when user explicitly wants support AND has provided both name and email
-- If information is not in the guide, you can suggest contacting support
+        # Few-shot examples (from merege-code.py)
+        few_shot_examples = [
+            # 1) Reset device (EN) – direct + steps
+            {
+                "context": (
+                    "User Guide Summary:\n"
+                    "- Soft reset: Settings > System > Reset.\n"
+                    "- Hard reset: giữ nút Reset ~10 giây đến khi LED đỏ nhấp nháy.\n\n"
+                    "Original Document (truncated):\n"
+                    "Hardware reset requires pressing and holding the recessed button for 8–12 seconds.\n"
+                ),
+                "question": "How do I perform a hard reset?",
+                "final_answer": (
+                    "Use the physical reset button:\n"
+                    "- Power on the device.\n"
+                    "- Press and hold the recessed **Reset** button for ~10 seconds until the LED blinks red.\n"
+                    "- Release to complete the hard reset.\n"
+                    "If the LED never blinks, check the Hardware Reset section for model-specific notes."
+                ),
+            },
 
-## Example Interactions:
+            # 2) Export PDF (EN) – feature gating + alternatives
+            {
+                "context": (
+                    "User Guide Summary:\n"
+                    "- Export: TXT/HTML available by default.\n"
+                    "- PDF export requires Advanced Preview to be enabled.\n"
+                ),
+                "question": "Can I export the summary to PDF?",
+                "final_answer": (
+                    "Yes, if **Advanced Preview** is enabled:\n"
+                    "- Open **Advanced Preview** → **Export** → **PDF**.\n"
+                    "- If it's disabled, either enable Advanced Preview or export **TXT/HTML** instead."
+                ),
+            },
 
-Example 1 - Normal question:
-User: "How do I reset the device?"
-Assistant: "To reset the device, go to Settings > Advanced > Reset to Factory Defaults."
+            # 3) Missing data (EN) – Unknown/Not in guide
+            {
+                "context": (
+                    "User Guide Summary:\n"
+                    "- The app supports English, Spanish, and Japanese UI.\n"
+                    "- Auto language detection applies to the chatbot only.\n"
+                ),
+                "question": "Does the UI support German?\n",
+                "final_answer": (
+                    "Not in guide. The summary lists **English, Spanish, Japanese** only for the UI. "
+                    "German isn't mentioned—please check the Localization section or release notes."
+                ),
+            },
 
-Example 2 - Support request with info:
-User: "I need help with a warranty issue. My name is John Doe and email is john@example.com"
-Assistant: [Calls create_support_ticket function]
+            # 4) Multi-language auto (ES) – respond in question language
+            {
+                "context": (
+                    "User Guide Summary:\n"
+                    "- Las copias de seguridad automáticas se ejecutan a las 02:00.\n"
+                    "- Se pueden cambiar desde Settings > Backup Schedule.\n"
+                ),
+                "question": "¿Cómo cambio la hora de la copia de seguridad?\n",
+                "final_answer": (
+                    "Ve a **Settings → Backup Schedule** y cambia la hora predeterminada (02:00) a la que prefieras. "
+                    "Guarda los cambios para aplicarlos en la próxima ejecución."
+                ),
+            },
 
-Example 3 - Support request without info:
-User: "I want to contact support"
-Assistant: "I can help you create a support ticket. Please provide your name and email address so our team can contact you.\""""
+            # 5) Troubleshooting (VI) – actions + conditions
+            {
+                "context": (
+                    "User Guide Summary:\n"
+                    "- Đăng nhập yêu cầu email đã xác thực.\n"
+                    "- Sau 5 lần sai mật khẩu, tài khoản bị tạm khóa 15 phút.\n"
+                    "- Có mục Reset password qua email.\n"
+                ),
+                "question": "Không đăng nhập được thì làm sao?\n",
+                "final_answer": (
+                    "Thử theo thứ tự:\n"
+                    "- Kiểm tra bạn đã xác thực email chưa.\n"
+                    "- Nếu quên mật khẩu: dùng **Reset password** để đặt lại.\n"
+                    "- Nếu nhập sai >5 lần: chờ 15 phút rồi thử lại.\n"
+                    "- Vẫn lỗi: xem mục **Troubleshooting → Login** để kiểm tra mã lỗi cụ thể."
+                ),
+            },
+        ]
 
         # Create context with document information
         context = f"User Guide Summary:\n{guide_summary}"
         if guide_document:
-            context += f"\n\nOriginal Document:\n{guide_document[:2000]}..." if len(guide_document) > 2000 else f"\n\nOriginal Document:\n{guide_document}"
-        
+            context += (
+                f"\n\nOriginal Document:\n{guide_document[:2000]}..."
+                if len(guide_document) > 2000
+                else f"\n\nOriginal Document:\n{guide_document}"
+            )
+
+        # Build messages with few-shot examples
+        messages = [{"role": "system", "content": system_prompt}]
+
+        # Add few-shot examples
+        for ex in few_shot_examples:
+            ex_prompt = f"""Based on the following user guide information, please answer the user's question accurately and concisely.{language_instruction}
+
+{ex["context"]}
+
+User Question: {ex["question"]}
+
+Answer:"""
+            ex_response = {
+                "reasoning": "Example reasoning omitted.",
+                "answer": ex["final_answer"]
+            }
+            messages.append({"role": "user", "content": ex_prompt})
+            messages.append({"role": "assistant", "content": json.dumps(ex_response, ensure_ascii=False)})
+
         # User prompt with context and question
-        user_prompt = f"""Here is the documentation context:
+        user_prompt = f"""Based on the following user guide information, please answer the user's question accurately and concisely.{language_instruction}
 
 {context}
 
 User Question: {question}
 
-Remember to return your response in the specified JSON format."""
-        
+Answer:"""
+
+        messages.append({"role": "user", "content": user_prompt})
+
+        # Call API with function calling support
         response = client.chat.completions.create(
             model=model,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt}
-            ],
+            messages=messages,
             functions=functions,
             function_call="auto",  # Let the model decide when to call functions
             max_tokens=400,
@@ -348,28 +441,45 @@ Our support team will review your query and respond within 24-48 hours."""
             
             # Parse the JSON response
             response_json = json.loads(content)
-            
+
             # Log the reasoning internally (visible in terminal/logs)
             if response_json.get('reasoning'):
                 print(f"🧠 Reasoning: {response_json['reasoning']}")
-            
+
             # Get the answer from the JSON - try both 'answer' and 'response' fields
             answer = response_json.get('answer') or response_json.get('response', response_message.content)
-            
+
+            # Check if information was not found and suggest support contact
+            fallback_keywords = [
+                "not found", "not in guide", "not in the guide", "not mentioned",
+                "not available", "no information", "not explicitly found",
+                "does not provide", "doesn't provide", "not provide",
+                "does not contain", "doesn't contain", "not contain",
+                "cannot find", "can't find", "unable to find",
+                "not covered", "not included", "not described",
+                "không tìm thấy", "không có", "không được đề cập"  # Vietnamese
+            ]
+            answer_lower = answer.lower()
+            info_not_found = any(keyword in answer_lower for keyword in fallback_keywords)
+
             # Add confidence indicator if low confidence
             confidence = response_json.get('confidence', 1.0)
             if confidence < 0.7:
                 answer = f"⚠️ *Note: Lower confidence answer*\n\n{answer}"
-            
+
             # Add sources if available
             sources = response_json.get('sources', [])
             if sources:
                 answer += f"\n\n📚 **Sources:** {', '.join(sources)}"
-            
-            # Add note if not found in guide
-            if response_json.get('found_in_guide') == False:
+
+            # Add note if not found in guide with support contact suggestion
+            if response_json.get('found_in_guide') == False or info_not_found:
                 answer += "\n\n📌 *Note: This information was not explicitly found in the user guide.*"
-            
+                answer += "\n\n💡 **Need more help?** Contact our support team by providing:"
+                answer += "\n- Your **name**"
+                answer += "\n- Your **email address**"
+                answer += "\n\nExample: *\"I need help with [your issue]. My name is John Doe and email is john@example.com\"*"
+
             # Update previous_question for next interaction
             st.session_state.previous_question = question
             return answer
