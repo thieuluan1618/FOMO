@@ -6,6 +6,9 @@ import io
 import json
 import re
 from datetime import datetime
+import chromadb
+from chromadb.config import Settings
+import tiktoken
 
 from audio_player import create_audio_player
 from tts import load_tts, speak
@@ -111,6 +114,12 @@ if "tts_playing" not in st.session_state:
     st.session_state.tts_playing = {}
 if "tts_last_clicked" not in st.session_state:
     st.session_state.tts_last_clicked = None
+if 'chroma_client' not in st.session_state:
+    st.session_state.chroma_client = None
+if 'chroma_collection' not in st.session_state:
+    st.session_state.chroma_collection = None
+if 'chromadb_config' not in st.session_state:
+    st.session_state.chromadb_config = None
 
 def initialize_client():
     """Initialize Azure OpenAI client with error handling"""
@@ -132,6 +141,178 @@ def initialize_client():
     except Exception as e:
         st.error(f"❌ Failed to initialize Azure OpenAI client: {str(e)}")
         return None
+
+def initialize_chromadb(host="localhost", port=8000, use_server=False, use_cloud=False, api_key="", tenant="", database=""):
+    """Initialize ChromaDB client and collection for semantic search
+    
+    Args:
+        host: ChromaDB server host (default: "localhost")
+        port: ChromaDB server port (default: 8000)
+        use_server: If True, use HttpClient to connect to server; if False, use local PersistentClient
+        use_cloud: If True, use CloudClient with authentication
+        api_key: API key for CloudClient authentication
+        tenant: Tenant ID for CloudClient
+        database: Database name for CloudClient
+    """
+    try:
+        if use_cloud:
+            # Connect to ChromaDB Cloud with authentication
+            if not api_key or not tenant or not database:
+                print("⚠️ Cloud mode requires API key, tenant, and database")
+                return None, None
+            
+            client = chromadb.CloudClient(
+                api_key=api_key,
+                tenant=tenant,
+                database=database
+            )
+            print(f"☁️ Connecting to ChromaDB Cloud (tenant: {tenant}, database: {database})...")
+        elif use_server:
+            # Connect to ChromaDB server via HTTP
+            client = chromadb.HttpClient(
+                host=host,
+                port=port
+            )
+            print(f"🌐 Connecting to ChromaDB server at {host}:{port}...")
+        else:
+            # Use local persistent storage
+            client = chromadb.PersistentClient(
+                path="./chroma_db"
+            )
+            print(f"💾 Using local ChromaDB at ./chroma_db")
+        
+        # Test connection by trying to list collections
+        try:
+            client.heartbeat()  # Test if server is responsive
+        except Exception as e:
+            print(f"⚠️ ChromaDB connection test failed: {str(e)}")
+            if use_cloud:
+                print(f"💡 Check your cloud credentials and network connection")
+            elif use_server:
+                print(f"💡 Make sure ChromaDB server is running: chroma run --host {host} --port {port} --path ./chroma_db")
+            return None, None
+        
+        # Create or get collection with auto-embedding
+        collection = client.get_or_create_collection(
+            name="user_guide_docs",
+            metadata={"hnsw:space": "cosine"}  # Use cosine similarity
+        )
+        
+        if use_cloud:
+            print(f"✅ ChromaDB Cloud connected: {tenant}/{database}")
+        elif use_server:
+            print(f"✅ ChromaDB server connected: {host}:{port}")
+        else:
+            print(f"✅ ChromaDB initialized locally: ./chroma_db")
+        
+        return client, collection
+        
+    except Exception as e:
+        print(f"❌ ChromaDB initialization failed: {str(e)}")
+        if use_cloud:
+            print(f"💡 Check your cloud credentials (API key, tenant, database) and network connection")
+        elif use_server:
+            print(f"💡 Make sure ChromaDB server is running: chroma run --host {host} --port {port} --path ./chroma_db")
+        return None, None
+
+def chunk_text(text, chunk_size=500, overlap=50, encoding_name="cl100k_base"):
+    """Split text into token-aware overlapping chunks"""
+    try:
+        # Get tokenizer
+        encoding = tiktoken.get_encoding(encoding_name)
+        
+        # Encode the text
+        tokens = encoding.encode(text)
+        
+        chunks = []
+        start = 0
+        
+        while start < len(tokens):
+            # Get chunk
+            end = start + chunk_size
+            chunk_tokens = tokens[start:end]
+            
+            # Decode back to text
+            chunk_text = encoding.decode(chunk_tokens)
+            chunks.append(chunk_text)
+            
+            # Move start position with overlap
+            start = end - overlap
+            
+            # Prevent infinite loop on last chunk
+            if end >= len(tokens):
+                break
+        
+        print(f"📄 Split document into {len(chunks)} chunks")
+        return chunks
+        
+    except Exception as e:
+        print(f"⚠️ Error chunking text: {str(e)}")
+        # Fallback: simple word-based chunking
+        words = text.split()
+        chunk_word_size = chunk_size * 3  # Rough approximation
+        chunks = []
+        for i in range(0, len(words), chunk_word_size - overlap * 3):
+            chunk = ' '.join(words[i:i + chunk_word_size])
+            chunks.append(chunk)
+        return chunks
+
+def embed_and_store_document(collection, document_text, document_id="user_guide"):
+    """Chunk and store document in ChromaDB with auto-embeddings"""
+    try:
+        if not collection:
+            print("⚠️ No ChromaDB collection available")
+            return False
+        
+        # Clear existing documents for this ID
+        try:
+            collection.delete(where={"doc_id": document_id})
+        except:
+            pass  # Collection might be empty
+        
+        # Chunk the document
+        chunks = chunk_text(document_text, chunk_size=500, overlap=50)
+        
+        # Prepare data for ChromaDB
+        ids = [f"{document_id}_chunk_{i}" for i in range(len(chunks))]
+        metadatas = [{"doc_id": document_id, "chunk_index": i} for i in range(len(chunks))]
+        
+        # Add to collection (ChromaDB will auto-embed)
+        collection.add(
+            documents=chunks,
+            ids=ids,
+            metadatas=metadatas
+        )
+        
+        print(f"✅ Stored {len(chunks)} chunks in ChromaDB")
+        return True
+        
+    except Exception as e:
+        print(f"❌ Error storing document in ChromaDB: {str(e)}")
+        return False
+
+def query_chromadb(collection, query_text, n_results=3):
+    """Semantic search to retrieve relevant document chunks"""
+    try:
+        if not collection:
+            print("⚠️ No ChromaDB collection available")
+            return []
+        
+        # Query the collection
+        results = collection.query(
+            query_texts=[query_text],
+            n_results=n_results
+        )
+        
+        # Extract documents
+        documents = results['documents'][0] if results['documents'] else []
+        
+        print(f"🔍 Retrieved {len(documents)} relevant chunks from ChromaDB")
+        return documents
+        
+    except Exception as e:
+        print(f"❌ Error querying ChromaDB: {str(e)}")
+        return []
 
 def create_support_ticket(name, email, question, previous_question=""):
     """Create a customer support ticket"""
@@ -212,7 +393,18 @@ def summarize_user_guide(client, text, summary_style="concise", max_tokens=300, 
             temperature=temperature
         )
         
-        return response.choices[0].message.content
+        summary = response.choices[0].message.content
+        
+        # Store document in ChromaDB for semantic search
+        if st.session_state.chroma_collection:
+            print("📦 Storing document in ChromaDB...")
+            embed_and_store_document(
+                st.session_state.chroma_collection,
+                text,
+                document_id="user_guide"
+            )
+        
+        return summary
         
     except Exception as e:
         return f"❌ Error generating summary: {str(e)}"
@@ -333,9 +525,26 @@ IMPORTANT:
             },
         ]
 
+        # Try to get relevant context from ChromaDB first
+        relevant_chunks = []
+        if st.session_state.chroma_collection and guide_document:
+            relevant_chunks = query_chromadb(
+                st.session_state.chroma_collection,
+                question,
+                n_results=3
+            )
+        
         # Create context with document information
         context = f"User Guide Summary:\n{guide_summary}"
-        if guide_document:
+        
+        # Use ChromaDB results if available, otherwise fall back to full document
+        if relevant_chunks:
+            context += "\n\nRelevant Information from User Guide:\n"
+            for i, chunk in enumerate(relevant_chunks, 1):
+                context += f"\n[Section {i}]\n{chunk}\n"
+            print("Chroma context 🤓")
+            print(context)
+        elif guide_document:
             context += (
                 f"\n\nOriginal Document:\n{guide_document[:2000]}..."
                 if len(guide_document) > 2000
@@ -600,8 +809,8 @@ def display_assistant_response(answer, reasoning=None, tool_call=None):
                     st.code(tool_call)
         with col2:
             key=f"tts_{hash(answer)}"
-            # if key not in st.session_state.tts_playing:
-            #     st.session_state.tts_playing[key] = False
+            if key not in st.session_state.tts_playing:
+                st.session_state.tts_playing[key] = False
 
             if not st.session_state.tts_playing[key]:
                 if st.button("🔊", key=key):
@@ -652,6 +861,70 @@ def main():
         help="Choose the style of summary you want"
     )
     
+    # ChromaDB Configuration
+    st.sidebar.header("🗄️ ChromaDB Configuration")
+    
+    chromadb_mode = st.sidebar.radio(
+        "Connection Mode",
+        ["Local Storage", "Self-Hosted Server", "Cloud (Managed)"],
+        index=2,  # Default to Cloud (Managed)
+        help="Choose how to connect to ChromaDB"
+    )
+    
+    # Default values - Load from environment variables if available
+    use_chromadb_server = False
+    use_chromadb_cloud = False
+    chromadb_host = "localhost"
+    chromadb_port = 8000
+    chromadb_api_key = os.getenv("CHROMADB_API_KEY", "")
+    chromadb_tenant = os.getenv("CHROMADB_TENANT", "")
+    chromadb_database = os.getenv("CHROMADB_DATABASE", "")
+    
+    if chromadb_mode == "Self-Hosted Server":
+        use_chromadb_server = True
+        chromadb_host = st.sidebar.text_input(
+            "Host",
+            value="localhost",
+            help="ChromaDB server host address"
+        )
+        chromadb_port = st.sidebar.number_input(
+            "Port",
+            value=8000,
+            min_value=1,
+            max_value=65535,
+            help="ChromaDB server port"
+        )
+        st.sidebar.info(f"🌐 Connecting to: {chromadb_host}:{chromadb_port}")
+        st.sidebar.caption("Make sure server is running:")
+        st.sidebar.code(f"chroma run --host {chromadb_host} --port {chromadb_port} --path ./chroma_db", language="bash")
+    
+    elif chromadb_mode == "Cloud (Managed)":
+        use_chromadb_cloud = True
+        chromadb_api_key = st.sidebar.text_input(
+            "API Key",
+            value=chromadb_api_key,
+            type="password",
+            help="Your ChromaDB Cloud API key (or set CHROMADB_API_KEY in .env)"
+        )
+        chromadb_tenant = st.sidebar.text_input(
+            "Tenant ID",
+            value=chromadb_tenant,
+            help="Your ChromaDB Cloud tenant ID (or set CHROMADB_TENANT in .env)"
+        )
+        chromadb_database = st.sidebar.text_input(
+            "Database Name",
+            value=chromadb_database,
+            help="Your ChromaDB Cloud database name (or set CHROMADB_DATABASE in .env)"
+        )
+        
+        if chromadb_api_key and chromadb_tenant and chromadb_database:
+            st.sidebar.info(f"☁️ Cloud: {chromadb_tenant}/{chromadb_database}")
+        else:
+            st.sidebar.warning("⚠️ Please enter all cloud credentials")
+    
+    else:  # Local Storage
+        st.sidebar.info("💾 Using local ChromaDB storage at ./chroma_db")
+    
     # Advanced settings
     with st.sidebar.expander("Advanced Settings"):
         max_tokens = st.slider("Max Output Length", 150, 1000, 300, 50)
@@ -671,6 +944,41 @@ def main():
     # Initialize client
     client = initialize_client()
     tts = load_tts('eng')
+    
+    # Initialize ChromaDB if not already initialized or if settings changed
+    # Force reinit if server settings changed
+    current_chromadb_config = (use_chromadb_server, use_chromadb_cloud, chromadb_host, chromadb_port, chromadb_api_key, chromadb_tenant, chromadb_database)
+    previous_chromadb_config = st.session_state.get('chromadb_config', None)
+    
+    if st.session_state.chroma_client is None or current_chromadb_config != previous_chromadb_config:
+        with st.spinner("🔄 Initializing ChromaDB..."):
+            chroma_client, chroma_collection = initialize_chromadb(
+                host=chromadb_host,
+                port=chromadb_port,
+                use_server=use_chromadb_server,
+                use_cloud=use_chromadb_cloud,
+                api_key=chromadb_api_key,
+                tenant=chromadb_tenant,
+                database=chromadb_database
+            )
+            st.session_state.chroma_client = chroma_client
+            st.session_state.chroma_collection = chroma_collection
+            st.session_state.chromadb_config = current_chromadb_config
+            
+            # Show connection status
+            if chroma_client is not None:
+                if use_chromadb_cloud:
+                    st.sidebar.success(f"✅ Connected to ChromaDB Cloud: {chromadb_tenant}/{chromadb_database}")
+                elif use_chromadb_server:
+                    st.sidebar.success(f"✅ Connected to ChromaDB server at {chromadb_host}:{chromadb_port}")
+                else:
+                    st.sidebar.success("✅ ChromaDB initialized locally")
+            else:
+                st.sidebar.error("❌ ChromaDB initialization failed")
+                if use_chromadb_cloud:
+                    st.sidebar.warning("⚠️ Could not connect to ChromaDB Cloud. Please check your credentials and network connection.")
+                elif use_chromadb_server:
+                    st.sidebar.warning(f"⚠️ Could not connect to ChromaDB server at {chromadb_host}:{chromadb_port}. Please check if the server is running.")
     
     if client is None or tts is None:
         st.stop()
