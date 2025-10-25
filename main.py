@@ -7,6 +7,9 @@ import json
 import re
 from datetime import datetime
 
+from audio_player import create_audio_player
+from tts import load_tts, speak
+
 # Load environment variables from .env file
 load_dotenv()
 
@@ -104,6 +107,10 @@ if 'previous_question' not in st.session_state:
     st.session_state.previous_question = ""
 if 'support_tickets' not in st.session_state:
     st.session_state.support_tickets = []
+if "tts_playing" not in st.session_state:
+    st.session_state.tts_playing = {}
+if "tts_last_clicked" not in st.session_state:
+    st.session_state.tts_last_clicked = None
 
 def initialize_client():
     """Initialize Azure OpenAI client with error handling"""
@@ -577,17 +584,43 @@ def answer_question_auto_lang(client, question, guide_summary, guide_document=""
     except Exception as e:
         return f"❌ Error answering question: {str(e)}"
 
+
 def display_assistant_response(answer, reasoning=None, tool_call=None):
     with st.chat_message("assistant"):
-        st.markdown(answer)
-        if reasoning:
-            # show reasoning in an expander (toggle controlled by session state)
-            with st.expander("Show reasoning", expanded=False):
-                st.markdown(reasoning)
-        if tool_call:
-            # show tool_call in an expander (toggle controlled by session state)
-            with st.expander("Show tool_call", expanded=False):
-                st.code(tool_call)
+        col1, col2 = st.columns([0.9, 0.1])
+        with col1:
+            st.markdown(answer)
+            if reasoning:
+                # show reasoning in an expander (toggle controlled by session state)
+                with st.expander("Show reasoning", expanded=False):
+                    st.markdown(reasoning)
+            if tool_call:
+                # show tool_call in an expander (toggle controlled by session state)
+                with st.expander("Show tool_call", expanded=False):
+                    st.code(tool_call)
+        with col2:
+            key=f"tts_{hash(answer)}"
+            # if key not in st.session_state.tts_playing:
+            #     st.session_state.tts_playing[key] = False
+
+            if not st.session_state.tts_playing[key]:
+                if st.button("🔊", key=key):
+                    st.session_state.tts_playing[key] = True
+                    st.session_state.tts_last_clicked = key
+                    st.rerun()  # ensure immediate refresh to show player
+            else:
+                with st.spinner(""):
+                    audio_data, sr = speak(answer, lang='eng')
+                autoplay = (st.session_state.tts_last_clicked == key)
+                create_audio_player(audio_data, sr, autoplay=True)
+                st.session_state.tts_last_clicked = None
+                st.session_state.tts_playing[key] = False
+
+            # if st.button("🔊", key=key):
+            #     with st.spinner(""):
+            #         audio_data, sample_rate = speak(answer, lang='eng')
+            #         # st.audio(audio_data, format="audio/wav", sample_rate=sample_rate, autoplay=True)
+            #         create_audio_player(audio_data, sample_rate)
 
 def main():
     # Header
@@ -637,8 +670,9 @@ def main():
     
     # Initialize client
     client = initialize_client()
+    tts = load_tts('eng')
     
-    if client is None:
+    if client is None or tts is None:
         st.stop()
     
     # Main content area with tabs
