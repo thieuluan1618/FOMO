@@ -36,8 +36,6 @@ from langchain_community.document_loaders import TextLoader, PyPDFLoader, Docx2t
 from langchain_text_splitters import RecursiveCharacterTextSplitter, SentenceTransformersTokenTextSplitter
 from langchain_pinecone import PineconeVectorStore
 from langchain.tools import tool
-from langchain.agents import create_agent
-from langchain.agents.structured_output import ToolStrategy
 from langgraph.graph import StateGraph, START, END, MessagesState
 
 # from langchain.chains import RetrievalQA
@@ -447,9 +445,10 @@ Answer:"""
     return system_prompt, messages
 
 def stream_answer(agent, question):
+    # Caller is responsible for appending the user message to chat_history first.
     history = st.session_state.chat_history
     stream = agent.stream(
-        {"messages": [*history, {"role": "user", "content": question}]},
+        {"messages": history},
         # {"configurable": {"thread_id": st.session_state.get("session_id", "1")}}
     )
     
@@ -504,11 +503,6 @@ def stream_answer(agent, question):
                     st.session_state.tts_last_clicked = None
                     st.session_state.tts_playing[key] = False
 
-                if tts_btn:
-                    with st.spinner(""):
-                        audio_data, sample_rate = speak(answer, lang='eng')
-                        create_audio_player(audio_data, sample_rate)
-
 def display_assistant_response(answer, reasoning=None, tool_call=None, language='eng'):
     with st.chat_message("assistant"):
         col1, col2 = st.columns([0.9, 0.1])
@@ -539,17 +533,14 @@ def display_assistant_response(answer, reasoning=None, tool_call=None, language=
                 st.session_state.tts_last_clicked = None
                 st.session_state.tts_playing[key] = False
 
-            if tts_btn:
-                with st.spinner(""):
-                    audio_data, sample_rate = speak(answer, lang='eng')
-                    create_audio_player(audio_data, sample_rate)
-
 # -------------------------
 # Chains
 # -------------------------
 @tool(response_format="content_and_artifact")
 def retrieve_context(query: str):
     """Retrieve information to help answer a query."""
+    if vectordb is None:
+        return "No vector store configured. Please set up Pinecone in the sidebar.", []
     retrieved_docs = vectordb.similarity_search(query, k=global_top_k)
     serialized = "\n\n".join(
         (f"Source: {doc.metadata}\nContent: {doc.page_content}")
@@ -603,8 +594,14 @@ def tool_node(state: dict):
     result = []
     for tool_call in state["messages"][-1].tool_calls:
         tool = tools_by_name[tool_call["name"]]
-        observation = tool.invoke(tool_call["args"])
-        result.append(ToolMessage(content=observation, tool_call_id=tool_call["id"]))
+        # Invoke with the full tool_call dict so tools using
+        # response_format="content_and_artifact" return a proper ToolMessage
+        # instead of a raw (content, artifact) tuple.
+        tool_msg = tool.invoke(tool_call)
+        if not isinstance(tool_msg, ToolMessage):
+            content = tool_msg[0] if isinstance(tool_msg, tuple) else tool_msg
+            tool_msg = ToolMessage(content=str(content), tool_call_id=tool_call["id"])
+        result.append(tool_msg)
     return {"messages": result}
 
 # Conditional edge function to route to the tool node or end based upon whether the LLM made a tool call
@@ -1093,6 +1090,7 @@ def tab_qa(llm: BaseChatModel, retriever: BaseRetriever, lang: str, voice: str, 
 
                 if st.session_state.button_state != -1:
                     suggestion = suggested_questions[st.session_state.button_state]
+                    st.session_state.button_state = -1  # consume so it doesn't replay on rerun
                     st.session_state.chat_history.append({"role": "user", "content": suggestion})
                     with st.chat_message("user"):
                         st.markdown(suggestion)
